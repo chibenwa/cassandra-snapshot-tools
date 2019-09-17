@@ -1,6 +1,6 @@
 #!/bin/bash
-# Name: getSnapshot
-# Description: Packages a keyspace snapshot to be restored to the same, or a
+# Name: localDataBackup.sh
+# Description: Takes and Packages a keyspace snapshot to be restored to the same, or a
 #              different Cassandra cluster.  Must be executed on a running
 #              Cassandra node, have access to the cassandra.yaml file, and be
 #              able to read the data file location(s).
@@ -31,7 +31,7 @@
 
 # Configuration
 # -------------
-    PROGNAME="getSnapshot"
+    PROGNAME="localDataBackup.sh"
     PROGVER="1.0.1"
     ASFCFG="/etc/cassandra"
     DSECFG="/etc/dse/cassandra"
@@ -45,25 +45,9 @@
     SNAPSFILE="cassandra.snapshot"
     HOSTSFILE="cassandra.hostname"
     DATESFILE="cassandra.snapdate"
-    APPENDTIMESTAMP="yes"
 
 # Functions
 # ---------
-    function check_dependencies() {
-        # Function to iterate through a list of required executables to ensure
-        # they are installed and executable by the current user.
-        DEPS="awk basename cp cqlsh date dirname echo find "
-        DEPS+="getopt grep hostname mkdir rm sed tail tar "
-        for bin in $DEPS; do
-            $( which $bin >/dev/null 2>&1 ) || NOTFOUND+="$bin "
-        done
-
-        if [ ! -z "$NOTFOUND" ]; then
-            printf "Error finding required executables: ${NOTFOUND}\n" >&2
-            exit 1
-        fi
-    }
-
     function parse_yaml() {
         # Basic (as in imperfect) parsing of a given YAML file.  Parameters
         # are stored as environment variables.
@@ -94,9 +78,8 @@
         printf "    -h,--help                          Print usage and exit\n"
         printf "    -v,--version                       Print version information and exit\n"
         printf "    -k,--keyspace <keyspace name>      REQUIRED: The name of the keyspace to snapshot\n"
-        printf "    -s,--snapshot <snapshot name>      The name of an existing snapshot to package\n"
+        printf "    -s,--snapshot <snapshot name>      REQUIRED: The name of an existing snapshot to package\n"
         printf "    -y,--yaml <cassandra.yaml file>    Alternate cassandra.yaml file\n"
-        printf "    --no-timestamp                     Don't include a timestamp in the resulting filename\n"
         exit 0
     }
 
@@ -138,20 +121,32 @@
             -k|--keyspace) KEYSPACE="$2"; shift 2;;
             -s|--snapshot) SNAPSHOT="$2"; shift 2;;
             -y|--yaml) INPYAML="$2"; shift 2;;
-            --no-timestamp) APPENDTIMESTAMP="no"; shift;;
             --) shift; break;;
             *) printf "Error processing command arguments\n" >&2; exit 1;;
         esac
     done
 
-    # Verify required binaries at this point
-    check_dependencies
 
-    # Only KEYSPACE is absolutely required
+    # KEYSPACE is absolutely required
     if [ "$KEYSPACE" == "" ]; then
         printf "You must provide a keyspace name\n"
         exit 1
     fi
+    # SNAPSHOT is absolutely required
+    if [ "$SNAPSHOT" == "" ]; then
+        printf "You must provide a snapshot name\n"
+        exit 1
+    fi
+
+    # Verify required binaries at this point
+    ./check_dependencies.sh awk basename cp cqlsh date dirname echo find getopt grep hostname mkdir rm sed tail tar nodetool
+    RETVAL=$?
+    if [[ "$RETVAL" != "0" ]]; then
+        exit 1
+    fi
+
+    # Take the snapshot
+    nodetool snapshot --tag ${SNAPSHOT} ${KEYSPACE}
 
     # Need write access to local directory to create dump file
     if [ ! -w $( pwd ) ]; then
@@ -277,30 +272,29 @@
         printf "Schema backup failed\n"
         [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
         exit 1
+    fi
+
+    FILENAME="$SNAPSHOT.tar.gz"
+
+    tar --directory "$DUMPDIR" \
+        -zcvf $FILENAME \
+              $KEYSPACE \
+              $SCHEMA \
+              $KEYSPFILE \
+              $SNAPSFILE \
+              $HOSTSFILE \
+              $DATESFILE >/dev/null 2>&1
+    RC=$?
+
+    if [ $RC -gt 0 ]; then
+        printf "Error generating tar archive\n"
+        [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
+        exit 1
     else
-        # Include the timestamp in the filename or not (i.e. --no-timestamp)
-        [ "$APPENDTIMESTAMP" == "no" ] && FILENAME="$KEYSPACE.tar.gz" \
-                                       || FILENAME="$KEYSPACE-$TIMESTAMP.tar.gz"
-
-        tar --directory "$DUMPDIR" \
-            -zcvf $FILENAME \
-                  $KEYSPACE \
-                  $SCHEMA \
-                  $KEYSPFILE \
-                  $SNAPSFILE \
-                  $HOSTSFILE \
-                  $DATESFILE >/dev/null 2>&1
-        RC=$?
-
-        if [ $RC -gt 0 ]; then
-            printf "Error generating tar archive\n"
-            [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
-            exit 1
-        else
-            printf "Successfully created snapshot package\n"
-            [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
-            exit 0
-        fi
+        printf "Successfully created snapshot package\n"
+        [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
+        nodetool clearsnapshot -t ${SNAPSHOT} ${KEYSPACE}
+        exit 0
     fi
 
 # Fin.

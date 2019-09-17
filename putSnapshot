@@ -44,7 +44,7 @@
         # Function to iterate through a list of required executables to ensure
         # they are installed and executable by the current user.
         DEPS="awk cat cqlsh cut echo find getopt grep hostname "
-        DEPS+="mkdir rm sed sstableloader tar tr "
+        DEPS+="mkdir rm sed sstableloader tar tr nodetool "
         for bin in $DEPS; do
             $( which $bin >/dev/null 2>&1 ) || NOTFOUND+="$bin "
         done

@@ -13,7 +13,9 @@
 #              If a previous snapshot is not specified, a new snapshot is
 #              created using "nodetool snapshot <keyspace>".  The snapshot is
 #              packaged in a compressed TAR file with a copy of the schema.
-#
+
+# Copyright 2019 Linagora
+# From the original work of: 
 # Copyright 2016 Applied Infrastructure, LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");

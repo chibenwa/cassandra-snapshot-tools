@@ -28,23 +28,77 @@ Cassandra Snapshot Tools currently includes two BASH shell scripts, `localDataBa
         -s,--snapshot <snapshot name>      REQUIRED: The name of an existing snapshot to package
         -y,--yaml <cassandra.yaml file>    Alternate cassandra.yaml file
 
-#### putSnapshot
+#### localDataRestore
 
     Usage : 
         ./localDataRestore.sh SNAPSHOT_TAR KEYSPACE
             KEYSPACE: the keyspace where to restore all data
             SNAPSHOT_TAR: the snapshot tarball to restore data from
 
+#### truncateAll
+
+    Usage : 
+        ./turncateAll.sh KEYSPACE
+            KEYSPACE: the keyspace where to drop all data
+
+    Note: cqlsh needs to be installed
+
+#### dataSwift
+
+    Usage: ./dataSwift.sh command [options]
+
+    Commands:
+    upload - upload file to Swift
+    download - download file from Swift
+
+    Options:
+    -h,--help                          Print usage and exit
+    -b,--bucket <switf_container>      REQUIRED: The bucket in Swift where the file will be stored/downloaded
+    -f,--file <file>                   REQUIRED: The file to upload/download
+
+    Notes:
+    * You need to have swift client installed and be authenticated to your object storage first
+
+#### swiftDataBackup
+
+    Usage: ./swiftDataBackup.sh -h
+        ./swiftDataBackup.sh -k <keyspace name> [-s <snapshot name>] [-y <cassandra.yaml file>] [--no-timestamp]
+        -h,--help                          Print usage and exit
+        -v,--version                       Print version information and exit
+        -k,--keyspace <keyspace name>      REQUIRED: The name of the keyspace to snapshot
+        -s,--snapshot <snapshot name>      REQUIRED: The name of an existing snapshot to package
+        -b,--bucket <bucket name>          REQUIRED: The bucket name where the snapshot will be stored
+        -y,--yaml <cassandra.yaml file>    Alternate cassandra.yaml file
+
+#### swiftDataRestore
+
+    Usage : 
+    ./swiftDataRestore.sh -h 
+    ./swiftDataRestore.sh -k <keyspace name> -s <snapshot name> -b <bucket name>
+        -h,--help                          Print usage and exit
+        -k,--keyspace <keyspace name>      REQUIRED: the keyspace where to restore all data
+        -s,--snapshot <snapshot name>      REQUIRED: the snapshot tarball to restore data from on swift
+        -b,--bucket <bucket name>          REQUIRED: The bucket name where the snapshot is stored on swift
 
 ### Basic Examples
 
-1. Backup, clear then restore:
+1. Backup, clear then restore locally:
 
     ```sh
     $ ./localDataBackup.sh -k <keyspace name> -s <snapshot name>
     $ ./truncateAll.sh <keyspace name> 
     $ ./localDataRestore.sh <snapshot package file> <new keyspace name>
     ```
+
+2. Backup, clear then restore using a Swift object storage:
+
+    ```sh
+    $ ./swiftDataBackup.sh -k <keyspace name> -s <snapshot name> -b <bucket name>
+    $ ./truncateAll.sh <keyspace name> 
+    $ ./swiftDataRestore.sh -k <keyspace name> -s <snapshot name> -b <bucket name>
+    ```
+
+**Note**: you need to have swift client installed and your authentication configured by setting up variables in your environment (see `resources/object-storage.conf.swift.sample`)
 
 ### Caveats
 * Currently supports snapshots/restores between clusters running similar versions of Cassandra.

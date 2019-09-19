@@ -76,11 +76,10 @@ function parse_yaml() {
 
 function usage() {
     printf "Usage: $0 -h\n"
-    printf "       $0 -k <keyspace name> [-s <snapshot name>] [-y <cassandra.yaml file>] [--no-timestamp]\n"
+    printf "       $0 -k <keyspace name> -b <bucket name> [-y <cassandra.yaml file>]\n"
     printf "    -h,--help                          Print usage and exit\n"
     printf "    -v,--version                       Print version information and exit\n"
     printf "    -k,--keyspace <keyspace name>      REQUIRED: The name of the keyspace to snapshot\n"
-    printf "    -s,--snapshot <snapshot name>      REQUIRED: The name of an existing snapshot to package\n"
     printf "    -b,--bucket <bucket name>          REQUIRED: The bucket name where the snapshot will be stored\n"
     printf "    -y,--yaml <cassandra.yaml file>    Alternate cassandra.yaml file\n"
     exit 0
@@ -106,8 +105,8 @@ function version() {
 # --------------------------
 # Great sample getopt implementation by Cosimo Streppone
 # https://gist.github.com/cosimo/3760587#file-parse-options-sh
-SHORT='hvk:s:y:b:'
-LONG='help,version,keyspace:,snapshot:,yaml:,no-timestamp,bucket:'
+SHORT='hvk:y:b:'
+LONG='help,version,keyspace:,yaml:,no-timestamp,bucket:'
 OPTS=$( getopt -o $SHORT --long $LONG -n "$0" -- "$@" )
 
 if [ $? -gt 0 ]; then
@@ -122,7 +121,6 @@ while true; do
         -h|--help) usage;;
         -v|--version) version;;
         -k|--keyspace) KEYSPACE="$2"; shift 2;;
-        -s|--snapshot) SNAPSHOT="$2"; shift 2;;
         -b|--bucket) BUCKET="$2"; shift 2;;
         -y|--yaml) INPYAML="$2"; shift 2;;
         --) shift; break;;
@@ -136,11 +134,6 @@ if [ "$KEYSPACE" == "" ]; then
     printf "You must provide a keyspace name\n"
     exit 1
 fi
-# SNAPSHOT is absolutely required
-if [ "$SNAPSHOT" == "" ]; then
-    printf "You must provide a snapshot name\n"
-    exit 1
-fi
 # BUCKET is absolutely required
 if [ "$BUCKET" == "" ]; then
     printf "You must provide a bucket name\n"
@@ -148,14 +141,14 @@ if [ "$BUCKET" == "" ]; then
 fi
 
 # Verify required binaries at this point
-./check_dependencies.sh awk basename cp cqlsh date dirname echo find getopt grep hostname mkdir rm sed tail tar nodetool swift
+./check_dependencies.sh awk basename cqlsh date dirname find getopt hostname mkdir rm sed tail nodetool swift
 RETVAL=$?
 if [[ "$RETVAL" != "0" ]]; then
     exit 1
 fi
 
 # Take the snapshot
-nodetool snapshot --tag ${SNAPSHOT} ${KEYSPACE}
+nodetool snapshot --tag ${BUCKET} ${KEYSPACE}
 
 # Need write access to local directory to create dump file
 if [ ! -w $( pwd ) ]; then
@@ -226,52 +219,33 @@ fi
 # in cassandra-env.sh in some environments.
 JMXIP=127.0.0.1
 
-# Create/Pull Snapshot
+# Pull Snapshot
 # --------------------
-if [ -z "$SNAPSHOT" ]; then
-    # Create a new snapshot if a snapshot name was not provided
-    printf "No snapshot name provided, creating new snapshot\n"
+SEARCH=$( find "${DATADIR}/${KEYSPACE}" -type d -name "${BUCKET}" )
 
-    nodetool -h $JMXIP flush -- $KEYSPACE
-    OUTPUT=$( nodetool -h $JMXIP snapshot $KEYSPACE 2>&1 )
-    SNAPSHOT=$( grep -Eo '[0-9]{10}[0-9]+' <<< "$OUTPUT" | tail -1 )
-
-    # Check if the snapshot process failed
-    if [ -z "$SNAPSHOT" ]; then
-        printf "Problem creating snapshot for keyspace $KEYSPACE\n\n"
-        printf "$OUTPUT\n"
-        [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
-        exit 1
-    fi
+if [ -z "$SEARCH" ]; then
+    printf "No snapshots found with name ${BUCKET}\n"
+    [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
+    exit 1
 else
-    # If a snapshot name was provided, check if it exists
-    SEARCH=$( find "${DATADIR}/${KEYSPACE}" -type d -name "${SNAPSHOT}" )
-
-    if [ -z "$SEARCH" ]; then
-        printf "No snapshots found with name ${SNAPSHOT}\n"
-        [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
-        exit 1
-    else
-        printf "Using provided snapshot name ${SNAPSHOT}\n"
-    fi
+    printf "Using provided snapshot name ${BUCKET}\n"
 fi
 
 # Pull new/existing snapshot
-SNAPDIR="snapshots/$SNAPSHOT"
+SNAPDIR="snapshots/$BUCKET"
 SCHEMA="schema-$KEYSPACE-$TIMESTAMP.cdl"
 
 for dir in $( find "$DATADIR" -regex ".*/$SNAPDIR/[^\.]*.db" ); do
     NEWDIR=$( sed "s|${DATADIR}||" <<< $( dirname $dir ) | \
                 awk -F / '{print "/"$2"/"$3}' )
-
-    mkdir -p "$DUMPDIR/$NEWDIR"
-    cp $dir "$DUMPDIR/$NEWDIR/"
+    FILENAME=$(basename $dir)
+    swift upload $BUCKET $dir --object-name "$NEWDIR/$FILENAME"
 done
 
-# Backup the schema and create tar archive
-# ----------------------------------------
+# Backup the schema
+# -----------------
 printf "$KEYSPACE" > "$DUMPDIR/$KEYSPFILE"
-printf "$SNAPSHOT" > "$DUMPDIR/$SNAPSFILE"
+printf "$BUCKET" > "$DUMPDIR/$SNAPSFILE"
 printf "$HOSTNAME" > "$DUMPDIR/$HOSTSFILE"
 printf "$DATESTRING" > "$DUMPDIR/$DATESFILE"
 cqlsh $CASIP -k $KEYSPACE -f $CLITMPFILE | tail -n +2 > "$DUMPDIR/$SCHEMA"
@@ -283,42 +257,12 @@ if [ $? -gt 0 ] && [ ! -s "$DUMPDIR/$SCHEMA" ]; then
     exit 1
 fi
 
-FILENAME="$SNAPSHOT.tar.gz"
+for file in $( dir "$DUMPDIR" ); do
+    swift upload $BUCKET "$DUMPDIR/$file" --object-name $file
+done
 
-tar --directory "$DUMPDIR" \
-    -zcvf $FILENAME \
-            $KEYSPACE \
-            $SCHEMA \
-            $KEYSPFILE \
-            $SNAPSFILE \
-            $HOSTSFILE \
-            $DATESFILE >/dev/null 2>&1
-RC=$?
-
-if [ $RC -gt 0 ]; then
-    printf "Error generating tar archive\n"
-    [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
-    exit 1
-else
-    printf "Successfully created snapshot package\n"
-    [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
-    nodetool clearsnapshot -t ${SNAPSHOT} ${KEYSPACE}
-fi
-
-# Upload the tar archive to Swift object storage
-printf "About to upload $FILENAME to object storage\n"
-
-swift upload $BUCKET $FILENAME
-RC=$?
-
-if [ $RC -gt 0 ]; then
-    printf "Error uploading tar archive\n"
-    rm -f "$FILENAME"
-    exit 1
-else
-    printf "$FILENAME has been uploaded successfully to object storage\n"
-    rm -f "$FILENAME"
-    exit 0
-fi
+printf "Successfully uploaded snapshot\n"
+[ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
+nodetool clearsnapshot -t ${BUCKET} ${KEYSPACE}
 
 # Fin.

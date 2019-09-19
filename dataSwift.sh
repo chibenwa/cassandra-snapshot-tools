@@ -15,13 +15,8 @@
 # limitations under the License.
 
 # Name: ./dataSwift.sh 
-# Note: * curl needs to be installed
-#       * tmpauth is used at the moment for swift authentication (test setup)
-#
-# To do: * add a check if container exists or not, and create in case not
-#        * check if file exist or not?
-#        * verify response status of download and manage errors?
-#        * check auth in prod
+# Note: * swift client needs to be installed and configured to connect to your object storage.
+#          => see sample file in resources/object-storage.conf.swift.sample for variables to be exported.
 
 function usage() {
     echo "Usage: $0 command [options]"
@@ -32,26 +27,19 @@ function usage() {
     echo
     echo "Options:"
     echo "  -h,--help                          Print usage and exit"
-    echo "  -e,--endpoint <swift_endpoint>     REQUIRED: The name of the Swift endpoint for auth"
-    echo "  -u,--username <swift_username>     REQUIRED: The user name for auth"
-    echo "  -t,--tenant <swift_tenantname>     REQUIRED: The tenant name for auth"
-    echo "  -c,--creds <swift_credentials>     REQUIRED: The credentials for auth"
-    echo "  -b,--bucket <switf_container>      REQUIRED: The bucket in Swift where the file will be stored"
-    echo "  -f,--file <file>                   REQUIRED: The file to upload to Swift"
+    echo "  -b,--bucket <switf_container>      REQUIRED: The bucket in Swift where the file will be stored/downloaded"
+    echo "  -f,--file <file>                   REQUIRED: The file to upload/download"
+    echo
+    echo "Notes:"
+    echo "  * You need to have swift client installed and be authenticated to your object storage first"
     exit 0
 }
-
 
 function upload() {
     # Upload file
     echo "About to upload $FILE to object storage"
 
-    STATUS=$(curl -i -T $FILE -X PUT -H "X-Auth-Token: $AUTH_TOKEN" $STORAGE_URL/$BUCKET/$FILE | grep HTTP | awk {'print $2'} | sed -n '2p')
-
-    if [[ "$STATUS" != "201" ]]; then
-        echo "Error while trying to store $FILE to the object storage."
-        exit 1
-    fi
+    swift upload $BUCKET $FILE
 
     echo "$FILE has been uploaded successfully to object storage"
 }
@@ -61,11 +49,10 @@ function download() {
     # Download file
     echo "About to download $FILE from object storage"
 
-    curl -s -S -X GET -H "X-Auth-Token: $AUTH_TOKEN" $STORAGE_URL/$BUCKET/$FILE -O
-
+    swift download $BUCKET $FILE
+    
     echo "$FILE has been downloaded successfully from object storage"
 }
-
 
 if [[ -z "$1" || "$1" != "download" && "$1" != "upload" ]]; then
     usage
@@ -73,8 +60,8 @@ fi
 
 COMMAND=$1
 
-SHORT='he:u:t:c:b:f:'
-LONG='help,endpoint:,username:,tenant:,creds:,bucket:,file:'
+SHORT='hb:f:'
+LONG='help,bucket:,file:'
 OPTS=$( getopt -o $SHORT --long $LONG -n "$0" -- "$@" )
 
 if [ $? -gt 0 ]; then
@@ -87,10 +74,6 @@ eval set -- "$OPTS"
 while true; do
     case "$1" in
         -h|--help) usage;;
-        -e|--endpoint) ENDPOINT="$2"; shift 2;;
-        -u|--username) USERNAME="$2"; shift 2;;
-        -t|--tenant) TENANTNAME="$2"; shift 2;;
-        -c|--creds) CREDENTIALS="$2"; shift 2;;
         -b|--bucket) BUCKET="$2"; shift 2;;
         -f|--file) FILE="$2"; shift 2;;
         --) shift; break;;
@@ -98,65 +81,21 @@ while true; do
     esac
 done
 
-# ENDPOINT is absolutely required
-if [ "$ENDPOINT" == "" ]; then
-    echo "You must provide a Swift endpoint for authentication"
-    exit 1
-fi
-# USERNAME is absolutely required
-if [ "$USERNAME" == "" ]; then
-    echo "You must provide a Swift user name for authentication"
-    exit 1
-fi
-# TENANTNAME is absolutely required
-if [ "$TENANTNAME" == "" ]; then
-    echo "You must provide a Swift tenant name for authentication"
-    exit 1
-fi
-# CREDENTIALS is absolutely required
-if [ "$CREDENTIALS" == "" ]; then
-    echo "You must provide the Swift credentials for authentication"
-    exit 1
-fi
 # BUCKET is absolutely required
 if [ "$BUCKET" == "" ]; then
-    echo "You must provide the container in Swift where the file will be stored"
+    echo "You must provide the container in Swift where the file will be stored/downloaded"
     exit 1
 fi
 # FILE is absolutely required
 if [ "$FILE" == "" ]; then
-    echo "You must provide the file to upload"
+    echo "You must provide the file to upload/download"
     exit 1
 fi
 
 # Checking required dependencies
-./check_dependencies.sh curl awk grep echo
+./check_dependencies.sh swift
 RETVAL=$?
 if [[ "$RETVAL" != "0" ]]; then
-    exit 1
-fi
-
-# Authenticate and parse response
-shopt -s extglob # Required to trim whitespace; see below
-
-echo "About to authenticate towards $ENDPOINT"
-
-while IFS=':' read key value; do
-    # trim whitespace in "value"
-    value=${value##+([[:space:]])}; value=${value%%+([[:space:]])}
-
-    case "$key" in
-        X-Storage-Url) STORAGE_URL="$value"
-                ;;
-        X-Auth-Token) AUTH_TOKEN="$value"
-                ;;
-        HTTP*) read PROTO RESPONSE_CODE MSG <<< "$key{$value:+:$value}"
-                ;;
-     esac
-done < <(curl -i -H "X-Auth-User: $TENANTNAME:$USERNAME" -H "X-Auth-Key: $CREDENTIALS" $ENDPOINT)
-
-if [[ "$RESPONSE_CODE" != "200" ]]; then
-    echo "Error $RESPONSE_CODE while trying to authenticate to the Swift server. Verify your credentials or the connection"
     exit 1
 fi
 

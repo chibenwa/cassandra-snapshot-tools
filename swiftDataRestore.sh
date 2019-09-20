@@ -20,12 +20,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Configuration
+# -------------
+CASSDATA="/var/lib/cassandra/data"
+
+# Usage
+# -----
 function usage() {
-    echo "Usage : "
-    echo "$0 -k <keyspace name> -s <snapshot name> -b <bucket name>"
+    echo "Usage: $0 -h"
+    echo "       $0 -k <keyspace name> -b <bucket name>"
     echo "    -h,--help                          Print usage and exit"
     echo "    -k,--keyspace <keyspace name>      REQUIRED: the keyspace where to restore all data"
-    echo "    -s,--snapshot <snapshot name>      REQUIRED: the snapshot tarball to restore data from on swift"
     echo "    -b,--bucket <bucket name>          REQUIRED: The bucket name where the snapshot is stored on swift"
     exit 0
 }
@@ -34,8 +39,8 @@ function usage() {
 # --------------------------
 # Great sample getopt implementation by Cosimo Streppone
 # https://gist.github.com/cosimo/3760587#file-parse-options-sh
-SHORT='hk:s:b:'
-LONG='help,keyspace:,snapshot:,bucket:'
+SHORT='hk:b:'
+LONG='help,keyspace:,bucket:'
 OPTS=$( getopt -o $SHORT --long $LONG -n "$0" -- "$@" )
 
 if [ $? -gt 0 ]; then
@@ -49,7 +54,6 @@ while true; do
     case "$1" in
         -h|--help) usage;;
         -k|--keyspace) KEYSPACE="$2"; shift 2;;
-        -s|--snapshot) SNAPSHOT="$2"; shift 2;;
         -b|--bucket) BUCKET="$2"; shift 2;;
         --) shift; break;;
         *) echo "Error processing command arguments" >&2; exit 1;;
@@ -62,75 +66,33 @@ if [ "$KEYSPACE" == "" ]; then
     echo "You must provide a keyspace name\n"
     exit 1
 fi
-# SNAPSHOT is absolutely required
-if [ "$SNAPSHOT" == "" ]; then
-    echo "You must provide a snapshot name\n"
-    exit 1
-fi
 # BUCKET is absolutely required
 if [ "$BUCKET" == "" ]; then
     echo "You must provide a bucket name\n"
     exit 1
 fi
 
-echo "Restoring data stored in ${SNAPSHOT} into ${KEYSPACE}"
+echo "Restoring data stored in ${BUCKET} into ${KEYSPACE}"
 
 # Checking dependencies
-./check_dependencies.sh nodetool cp tar rm mkdir grep cut swift
+./check_dependencies.sh nodetool swift cqlsh
 RETVAL=$?
 if [[ "$RETVAL" != "0" ]]; then
   exit 1
 fi
 
 # Need write access to local directory to download snapshot package
-if [ ! -w $( pwd ) ]; then
-    echo "You must have write access to the current directory $( pwd )"
+if [ ! -w $CASSDATA ]; then
+    echo "You must have write access to the cassandra data directory $CASSDATA"
     exit 1
 fi
 
-TEMPDIR="$( pwd )/.localDataRestore.tmp${RANDOM}"
-# Remove local temp directory
-[ "$TEMPDIR" != "/" ] && rm -rf "$TEMPDIR"
+swift download $BUCKET -p $KEYSPACE -D $CASSDATA
+chown -R cassandra:cassandra $CASSDATA
 
-# Create temporary working directory
-if [ ! -d "$TEMPDIR" ] && [ ! -e "$TEMPDIR" ]; then
-    echo "Creating ${TEMPDIR}"
-    mkdir -p "$TEMPDIR"
-else
-    echo "Error creating temporary directory $TEMPDIR"
-    exit 1
-fi
-
-# Download snapshot package from Swift
-echo "About to download $SNAPSHOT from object storage"
-
-swift download $BUCKET $SNAPSHOT
-
-echo "$SNAPSHOT has been downloaded successfully from object storage"
-
-# Verify/Extract Snapshot Package
-tar -tvf "$SNAPSHOT" 2>&1 | grep "$KEYSPFILE" 2>&1 >/dev/null
-RC=$?
-if [ $RC -gt 0 ]; then
-    echo "Snapshot package $SNAPSHOT appears invalid or corrupt"
-    exit 1
-fi
-
-# Extract snapshot package
-tar -xf "$SNAPSHOT" --directory "$TEMPDIR"
-chown -R cassandra:cassandra $TEMPDIR
-
-for columnfamily in `ls "${TEMPDIR}/${KEYSPACE}"`; do
-    TABLE=`echo "${columnfamily}" | cut -d '-' -f 1`
-    echo "Copying data into ${TABLE} data directory"
-    cp -p $TEMPDIR/$KEYSPACE/$columnfamily/* /var/lib/cassandra/data/$KEYSPACE/$columnfamily/.
-    echo "Refreshing ${TABLE}"
-    nodetool refresh ${KEYSPACE} ${TABLE}
+for table in `cqlsh -e "USE $KEYSPACE; DESCRIBE TABLES;"`; do
+    echo "Refreshing ${table}"
+    nodetool refresh ${KEYSPACE} ${table}
 done
 
-# Cleanup tmp directory
-rm -rf "$TEMPDIR"
-# Cleanup snapshot
-rm -f "$SNAPSHOT"
-
-echo "Data successfully restored from ${SNAPSHOT} into ${KEYSPACE}"
+echo "Data successfully restored from ${BUCKET} into ${KEYSPACE}"

@@ -14,27 +14,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Usage ./turncateAll.sh $1
-# Where $1 is the keyspace where to drop all data
-# Note: cqlsh needs to be installed
-
-printUsage() {
-   echo "Usage : "
-   echo "./turncateAll.sh KEYSPACE"
-   echo "    KEYSPACE: the keyspace where to drop all data"
-   echo ""
-   echo "Note: cqlsh needs to be installed"
-   exit 1
+function usage() {
+    echo "Usage: $0 -h"
+    echo "       $0 -k <keyspace name> [-k <keyspace name> ...]"
+    echo "    -h,--help                          Print usage and exit"
+    echo "    -k,--keyspace <keyspace name>      REQUIRED: the keyspace where to drop all data (can drop multiple keyspaces)"
+    echo
+    echo "Note: cqlsh needs to be installed"
+    exit 0
 }
 
-# Validate arguments
-if [ -z "$1" ]; then
-    printUsage
+# Validate Input/Environment
+# --------------------------
+# Great sample getopt implementation by Cosimo Streppone
+# https://gist.github.com/cosimo/3760587#file-parse-options-sh
+SHORT='hk:'
+LONG='help,keyspace:'
+OPTS=$( getopt -o $SHORT --long $LONG -n "$0" -- "$@" )
+
+if [ $? -gt 0 ]; then
+    # Exit early if argument parsing failed
+    echo "Error parsing command arguments" >&2
+    exit 1
 fi
-if ! [ -z "$2" ]; then
-    printUsage
+
+eval set -- "$OPTS"
+while true; do
+    case "$1" in
+        -h|--help) usage;;
+        -k|--keyspace) KEYSPACES+=("$2"); shift 2;;
+        --) shift; break;;
+        *) echo "Error processing command arguments" >&2; exit 1;;
+    esac
+done
+
+# KEYSPACES is absolutely required
+if [ "$KEYSPACES" == "" ]; then
+    echo "You must provide keyspace(s) name(s)\n"
+    exit 1
 fi
-KEYSPACE=$1
 
 # Checking cqlsh presence
 ./check_dependencies.sh cqlsh
@@ -43,13 +61,15 @@ if [[ "$RETVAL" != "0" ]]; then
   exit 1
 fi
 
-# Warn about the desctructive action we are about to take
-echo "About to drop all data in $KEYSPACE keyspace"
-echo "We are nice, you have 5 seconds to CTRL+C if needed..."
-sleep 5
+for keyspace in ${KEYSPACES[@]}; do
+    # Warn about the desctructive action we are about to take
+    echo "About to drop all data in $keyspace keyspace"
+    echo "We are nice, you have 5 seconds to CTRL+C if needed..."
+    sleep 5
 
-# Drop all data in specified keyspace
-for table in `cqlsh -e "USE $KEYSPACE; DESCRIBE TABLES;"`; do
-    echo "TRUNCATE ${KEYSPACE}.${table};"
-    cqlsh -e "TRUNCATE ${KEYSPACE}.${table};"
+    # Drop all data in specified keyspace
+    for table in `cqlsh -e "USE $keyspace; DESCRIBE TABLES;"`; do
+        echo "TRUNCATE ${keyspace}.${table};"
+        cqlsh -e "TRUNCATE ${keyspace}.${table};"
+    done
 done

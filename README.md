@@ -64,10 +64,10 @@ You can as well use a Swift object storage to store directly all of the SSTable 
 #### swiftDataBackup
 
     Usage:  ./swiftDataBackup.sh -h
-            ./swiftDataBackup.sh -k <keyspace name> -b <bucket name> [-y <cassandra.yaml file>]
+            ./swiftDataBackup.sh -k <keyspace name> [-k <keyspace name> ...] -b <bucket name> [-y <cassandra.yaml file>]
         -h,--help                          Print usage and exit
         -v,--version                       Print version information and exit
-        -k,--keyspace <keyspace name>      REQUIRED: The name of the keyspace to snapshot
+        -k,--keyspace <keyspace name>      REQUIRED: The name of the keyspace to snapshot (can add multiple keyspaces)
         -b,--bucket <bucket name>          REQUIRED: The bucket name where the snapshot will be stored
         -y,--yaml <cassandra.yaml file>    Alternate cassandra.yaml file
 

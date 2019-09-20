@@ -42,7 +42,6 @@ CLITMPFILE="${DUMPDIR}/cqlschema"
 CASIP="127.0.0.1"
 JMXIP="127.0.0.1"
 HOSTNAME="$( hostname )"
-SNAPCREATE=false
 KEYSPFILE="cassandra.keyspace"
 SNAPSFILE="cassandra.snapshot"
 HOSTSFILE="cassandra.hostname"
@@ -76,10 +75,10 @@ function parse_yaml() {
 
 function usage() {
     printf "Usage: $0 -h\n"
-    printf "       $0 -k <keyspace name> -b <bucket name> [-y <cassandra.yaml file>]\n"
+    printf "       $0 -k <keyspace name> [-k <keyspace name> ...] -b <bucket name> [-y <cassandra.yaml file>]\n"
     printf "    -h,--help                          Print usage and exit\n"
     printf "    -v,--version                       Print version information and exit\n"
-    printf "    -k,--keyspace <keyspace name>      REQUIRED: The name of the keyspace to snapshot\n"
+    printf "    -k,--keyspace <keyspace name>      REQUIRED: The name of the keyspace to snapshot (can add multiple keyspaces)\n"
     printf "    -b,--bucket <bucket name>          REQUIRED: The bucket name where the snapshot will be stored\n"
     printf "    -y,--yaml <cassandra.yaml file>    Alternate cassandra.yaml file\n"
     exit 0
@@ -120,7 +119,7 @@ while true; do
     case "$1" in
         -h|--help) usage;;
         -v|--version) version;;
-        -k|--keyspace) KEYSPACE="$2"; shift 2;;
+        -k|--keyspace) KEYSPACES+=("$2"); shift 2;;
         -b|--bucket) BUCKET="$2"; shift 2;;
         -y|--yaml) INPYAML="$2"; shift 2;;
         --) shift; break;;
@@ -129,9 +128,9 @@ while true; do
 done
 
 
-# KEYSPACE is absolutely required
-if [ "$KEYSPACE" == "" ]; then
-    printf "You must provide a keyspace name\n"
+# KEYSPACES is absolutely required
+if [ "$KEYSPACES" == "" ]; then
+    printf "You must provide keyspace(s) name(s)\n"
     exit 1
 fi
 # BUCKET is absolutely required
@@ -147,49 +146,14 @@ if [[ "$RETVAL" != "0" ]]; then
     exit 1
 fi
 
-# Take the snapshot
-nodetool snapshot --tag ${BUCKET} ${KEYSPACE}
-
 # Need write access to local directory to create dump file
 if [ ! -w $( pwd ) ]; then
     printf "You must have write access to the current directory $( pwd )\n"
     exit 1
 fi
 
-# Attempt to locate data directory and keyspace files
-YAMLLIST="${INPYAML:-$( find "$DSECFG" "$ASFCFG" -type f -name cassandra.yaml 2>/dev/null ) }"
-
-for yaml in $YAMLLIST; do
-    if [ -r "$yaml" ]; then
-        eval $( parse_yaml "$yaml" )
-        # Search each data directory in the YAML
-        for directory in ${data_file_directories_[@]}; do
-            if [ -d "$directory/$KEYSPACE" ]; then
-                # Use the YAML that references the keyspace
-                DATADIR="$directory"
-                YAMLFILE="$yaml"
-                break
-            fi
-            # Used only when the keyspace can't be found
-            TESTED="$TESTED $directory"
-        done
-    fi
-done
-
-if [ -z "$TESTED" ] && [ -z "$DATADIR" ]; then
-    printf "No data directories, or no cassandra.yaml file found\n" >&2
-    exit 1
-elif [ -z "$DATADIR" ] || [ -z "$YAMLFILE" ]; then
-    printf "Keyspace data directory could not be found in:\n"
-    for dir in $TESTED; do
-        printf "    $dir/$KEYSPACE\n"
-    done
-    exit 1
-fi
-
 # Preparation
 # -----------
-eval $( parse_yaml "$YAMLFILE" )
 TIMESTAMP=$( date +"%Y%m%d%H%M%S" )
 DATESTRING=$( date )
 
@@ -201,68 +165,95 @@ else
     exit 1
 fi
 
-# Write temp command file for Cassandra CLI
-printf "desc keyspace $KEYSPACE;\n" > $CLITMPFILE
+# Do backup of each keyspace
+for keyspace in ${KEYSPACES[@]}; do
+    # Take the snapshot
+    nodetool snapshot --tag ${BUCKET} ${keyspace}
 
-# Get local Cassandra listen address.  Should be loaded via the selected
-# cassandra.yaml file above.
-if [ -z $listen_address ]; then
-    CASIP=$( hostname )
-elif [ "$listen_address" == "0.0.0.0" ]; then
-    CASIP=127.0.0.1
-else
-    CASIP=$listen_address
-fi
+    # Attempt to locate data directory and keyspace files
+    YAMLLIST="${INPYAML:-$( find "$DSECFG" "$ASFCFG" -type f -name cassandra.yaml 2>/dev/null ) }"
 
-# Get local Cassandra JMX address
-# Cheating for now - this is *usually* right, but may be set to a real IP
-# in cassandra-env.sh in some environments.
-JMXIP=127.0.0.1
+    for yaml in $YAMLLIST; do
+        if [ -r "$yaml" ]; then
+            eval $( parse_yaml "$yaml" )
+            # Search each data directory in the YAML
+            for directory in ${data_file_directories_[@]}; do
+                if [ -d "$directory/$keyspace" ]; then
+                    # Use the YAML that references the keyspace
+                    DATADIR="$directory"
+                    YAMLFILE="$yaml"
+                    break
+                fi
+                # Used only when the keyspace can't be found
+                TESTED="$TESTED $directory"
+            done
+        fi
+    done
 
-# Pull Snapshot
-# --------------------
-SEARCH=$( find "${DATADIR}/${KEYSPACE}" -type d -name "${BUCKET}" )
+    if [ -z "$TESTED" ] && [ -z "$DATADIR" ]; then
+        printf "No data directories, or no cassandra.yaml file found\n" >&2
+        exit 1
+    elif [ -z "$DATADIR" ] || [ -z "$YAMLFILE" ]; then
+        printf "Keyspace data directory could not be found in:\n"
+        for dir in $TESTED; do
+            printf "    $dir/$keyspace\n"
+        done
+        exit 1
+    fi
 
-if [ -z "$SEARCH" ]; then
-    printf "No snapshots found with name ${BUCKET}\n"
-    [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
-    exit 1
-else
-    printf "Using provided snapshot name ${BUCKET}\n"
-fi
+    eval $( parse_yaml "$YAMLFILE" )
 
-# Pull new/existing snapshot
-SNAPDIR="snapshots/$BUCKET"
-SCHEMA="schema-$KEYSPACE-$TIMESTAMP.cdl"
+    # Write temp command file for Cassandra CLI
+    printf "desc keyspace $keyspace;\n" > $CLITMPFILE
 
-for dir in $( find "$DATADIR" -regex ".*/$SNAPDIR/[^\.]*.db" ); do
-    NEWDIR=$( sed "s|${DATADIR}||" <<< $( dirname $dir ) | \
-                awk -F / '{print "/"$2"/"$3}' )
-    FILENAME=$(basename $dir)
-    swift upload $BUCKET $dir --object-name "$NEWDIR/$FILENAME"
+    # Pull Snapshot
+    # --------------------
+    SEARCH=$( find "${DATADIR}/${keyspace}" -type d -name "${BUCKET}" )
+
+    if [ -z "$SEARCH" ]; then
+        printf "No snapshots found with name ${BUCKET}\n"
+        [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
+        exit 1
+    else
+        printf "Using provided snapshot name ${BUCKET}\n"
+    fi
+
+    # Pull new/existing snapshot
+    SNAPDIR="snapshots/$BUCKET"
+    SCHEMA="schema-$keyspace-$TIMESTAMP.cdl"
+
+    for dir in $( find "$DATADIR" -regex ".*/$SNAPDIR/[^\.]*.db" ); do
+        NEWDIR=$( sed "s|${DATADIR}||" <<< $( dirname $dir ) | \
+                    awk -F / '{print "/"$2"/"$3}' )
+        FILENAME=$(basename $dir)
+        swift upload $BUCKET $dir --object-name "$NEWDIR/$FILENAME"
+    done
+
+    # Backup the schema
+    # -----------------
+    printf "$keyspace" > "$DUMPDIR/$keyspace.$KEYSPFILE"
+    printf "$BUCKET" > "$DUMPDIR/$keyspace.$SNAPSFILE"
+    printf "$HOSTNAME" > "$DUMPDIR/$keyspace.$HOSTSFILE"
+    printf "$DATESTRING" > "$DUMPDIR/$keyspace.$DATESFILE"
+    cqlsh $CASIP -k $keyspace -f $CLITMPFILE | tail -n +2 > "$DUMPDIR/$SCHEMA"
+    RC=$?
+
+    if [ $? -gt 0 ] && [ ! -s "$DUMPDIR/$SCHEMA" ]; then
+        printf "Schema backup failed for keyspace $keyspace\n"
+        [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
+        exit 1
+    fi
+
+    rm -f $CLITMPFILE
+    printf "Successfully uploaded snapshot for keyspace ${keyspace}\n"
+    nodetool clearsnapshot -t ${BUCKET} ${keyspace}
 done
-
-# Backup the schema
-# -----------------
-printf "$KEYSPACE" > "$DUMPDIR/$KEYSPFILE"
-printf "$BUCKET" > "$DUMPDIR/$SNAPSFILE"
-printf "$HOSTNAME" > "$DUMPDIR/$HOSTSFILE"
-printf "$DATESTRING" > "$DUMPDIR/$DATESFILE"
-cqlsh $CASIP -k $KEYSPACE -f $CLITMPFILE | tail -n +2 > "$DUMPDIR/$SCHEMA"
-RC=$?
-
-if [ $? -gt 0 ] && [ ! -s "$DUMPDIR/$SCHEMA" ]; then
-    printf "Schema backup failed\n"
-    [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
-    exit 1
-fi
 
 for file in $( dir "$DUMPDIR" ); do
     swift upload $BUCKET "$DUMPDIR/$file" --object-name $file
 done
 
-printf "Successfully uploaded snapshot\n"
 [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
-nodetool clearsnapshot -t ${BUCKET} ${KEYSPACE}
+printf "Backup successfully uploaded\n"
 
 # Fin.

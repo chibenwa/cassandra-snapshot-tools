@@ -74,9 +74,9 @@ You can as well use a Swift object storage to store directly all of the SSTable 
 #### swiftDataRestore
 
     Usage: ./swiftDataRestore.sh -h
-           ./swiftDataRestore.sh -k <keyspace name> -b <bucket name>
+           ./swiftDataRestore.sh -k <keyspace name> [-k <keyspace name> ...] -b <bucket name>
         -h,--help                          Print usage and exit
-        -k,--keyspace <keyspace name>      REQUIRED: the keyspace where to restore all data
+        -k,--keyspace <keyspace name>      REQUIRED: the keyspace where to restore the data (can restore multiple keyspaces)
         -b,--bucket <bucket name>          REQUIRED: The bucket name where the snapshot is stored on swift
 
 ### Basic Examples

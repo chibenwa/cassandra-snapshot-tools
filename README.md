@@ -40,11 +40,12 @@ You can as well use a Swift object storage to store directly all of the SSTable 
 #### truncateAll
 
     Usage: ./truncateAll.sh -h
-           ./truncateAll.sh -k <keyspace name> [-k <keyspace name> ...]
+           ./truncateAll.sh [-k <keyspace name> ...] [-t <keyspace_name.table_name> ...]
         -h,--help                          Print usage and exit
-        -k,--keyspace <keyspace name>      REQUIRED: the keyspace where to drop all data (can drop multiple keyspaces)
-
-    Note: cqlsh needs to be installed
+        -k,--keyspace <keyspace name>           The keyspace where to drop all data (can drop multiple keyspaces)
+        -t,--table <keyspace_name.table_name>   Single table to drop data (can drop multiple tables)
+    
+    Note: You need at least to pass as a parameter a keyspace or a table to backup!
 
 #### dataSwift
 

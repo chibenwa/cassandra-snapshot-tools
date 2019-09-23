@@ -16,11 +16,12 @@
 
 function usage() {
     echo "Usage: $0 -h"
-    echo "       $0 -k <keyspace name> [-k <keyspace name> ...]"
+    echo "       $0 [-k <keyspace name> ...] [-t <keyspace_name.table_name> ...]"
     echo "    -h,--help                          Print usage and exit"
-    echo "    -k,--keyspace <keyspace name>      REQUIRED: the keyspace where to drop all data (can drop multiple keyspaces)"
+    echo "    -k,--keyspace <keyspace name>           The keyspace where to drop all data (can drop multiple keyspaces)"
+    echo "    -t,--table <keyspace_name.table_name>   Single table to drop data (can drop multiple tables)"
     echo
-    echo "Note: cqlsh needs to be installed"
+    echo "Note: You need at least to pass as a parameter a keyspace or a table to backup!"
     exit 0
 }
 
@@ -28,8 +29,8 @@ function usage() {
 # --------------------------
 # Great sample getopt implementation by Cosimo Streppone
 # https://gist.github.com/cosimo/3760587#file-parse-options-sh
-SHORT='hk:'
-LONG='help,keyspace:'
+SHORT='hk:t:'
+LONG='help,keyspace:,table:'
 OPTS=$( getopt -o $SHORT --long $LONG -n "$0" -- "$@" )
 
 if [ $? -gt 0 ]; then
@@ -43,14 +44,15 @@ while true; do
     case "$1" in
         -h|--help) usage;;
         -k|--keyspace) KEYSPACES+=("$2"); shift 2;;
+        -t|--table) TABLES+=("$2"); shift 2;;
         --) shift; break;;
         *) echo "Error processing command arguments" >&2; exit 1;;
     esac
 done
 
-# KEYSPACES is absolutely required
-if [ "$KEYSPACES" == "" ]; then
-    echo "You must provide keyspace(s) name(s)\n"
+# KEYSPACES or TABLES is required
+if [[ "$KEYSPACES" == "" && "$TABLES" == "" ]]; then
+    printf "You must provide at least a keyspace or a table name\n"
     exit 1
 fi
 
@@ -61,15 +63,20 @@ if [[ "$RETVAL" != "0" ]]; then
   exit 1
 fi
 
-for keyspace in ${KEYSPACES[@]}; do
-    # Warn about the desctructive action we are about to take
-    echo "About to drop all data in $keyspace keyspace"
-    echo "We are nice, you have 5 seconds to CTRL+C if needed..."
-    sleep 5
+# Warn about the desctructive action we are about to take
+echo "About to drop all data in a bunch of keyspaces/tables"
+echo "We are nice, you have 5 seconds to CTRL+C if needed..."
+sleep 5
 
+for keyspace in ${KEYSPACES[@]}; do
     # Drop all data in specified keyspace
     for table in `cqlsh -e "USE $keyspace; DESCRIBE TABLES;"`; do
         echo "TRUNCATE ${keyspace}.${table};"
         cqlsh -e "TRUNCATE ${keyspace}.${table};"
     done
+done
+
+for table in ${TABLES[@]}; do
+    echo "TRUNCATE ${table};"
+    cqlsh -e "TRUNCATE ${table};"
 done

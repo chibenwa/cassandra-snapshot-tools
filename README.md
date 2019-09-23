@@ -44,7 +44,7 @@ You can as well use a Swift object storage to store directly all of the SSTable 
         -h,--help                          Print usage and exit
         -k,--keyspace <keyspace name>           The keyspace where to drop all data (can drop multiple keyspaces)
         -t,--table <keyspace_name.table_name>   Single table to drop data (can drop multiple tables)
-    
+
     Note: You need at least to pass as a parameter a keyspace or a table to backup!
 
 #### dataSwift
@@ -79,10 +79,13 @@ You can as well use a Swift object storage to store directly all of the SSTable 
 #### swiftDataRestore
 
     Usage: ./swiftDataRestore.sh -h
-           ./swiftDataRestore.sh -k <keyspace name> [-k <keyspace name> ...] -b <bucket name>
-        -h,--help                          Print usage and exit
-        -k,--keyspace <keyspace name>      REQUIRED: the keyspace where to restore the data (can restore multiple keyspaces)
-        -b,--bucket <bucket name>          REQUIRED: The bucket name where the snapshot is stored on swift
+           ./swiftDataRestore.sh -b <bucket_name> [-k <keyspace_name> ...] [-t <keyspace_name.table_name> ...]
+        -h,--help                                 Print usage and exit
+        -b,--bucket <bucket_name>                 REQUIRED: The bucket name where the snapshot is stored on swift
+        -k,--keyspace <keyspace_name>             The keyspace where to restore the data (can restore multiple keyspaces)
+        -t,--table <keyspace_name.table_name>     Single table to restore data (can restore multiple tables)
+
+        Note: You need at least to pass as a parameter a keyspace or a table to backup!
 
 ### Basic Examples
 

@@ -26,21 +26,58 @@ CASSDATA="/var/lib/cassandra/data"
 
 # Usage
 # -----
-function usage() {
+function usage {
     echo "Usage: $0 -h"
-    echo "       $0 -k <keyspace name> [-k <keyspace name> ...] -b <bucket name>"
-    echo "    -h,--help                          Print usage and exit"
-    echo "    -k,--keyspace <keyspace name>      REQUIRED: the keyspace where to restore the data (can restore multiple keyspaces)"
-    echo "    -b,--bucket <bucket name>          REQUIRED: The bucket name where the snapshot is stored on swift"
+    echo "       $0 -b <bucket_name> [-k <keyspace_name> ...] [-t <keyspace_name.table_name> ...]"
+    echo "    -h,--help                                 Print usage and exit"
+    echo "    -b,--bucket <bucket_name>                 REQUIRED: The bucket name where the snapshot is stored on swift"
+    echo "    -k,--keyspace <keyspace_name>             The keyspace where to restore the data (can restore multiple keyspaces)"
+    echo "    -t,--table <keyspace_name.table_name>     Single table to restore data (can restore multiple tables)"
+    echo
+    echo "    Note: You need at least to pass as a parameter a keyspace or a table to backup!"
     exit 0
+}
+
+# Refresh tables
+# Usage: refresh <keyspace> <table>
+function refresh {
+    echo "Refreshing $1.$2"
+    nodetool refresh $1 $2
+}
+
+# Restore keyspaces and tables
+function do_restore {
+    if [ -z "$1" ]; then
+        printf "Error. Should provide a keyspace or table name to do a snapshot"
+        exit 1
+    fi
+
+    FORMAT_NAME=$1
+    KEYSPACE=$(echo "$FORMAT_NAME" | awk -F . '{print $1}')
+    TABLE=$(echo "$FORMAT_NAME" | awk -F . '{print $2}')
+
+    echo "Restoring data stored in ${BUCKET} into ${FORMAT_NAME}"
+
+    swift download $BUCKET -p "$KEYSPACE/$TABLE" -D $CASSDATA
+    chown -R cassandra:cassandra "$CASSDATA/$KEYSPACE"
+
+    if [[ "$TABLE" == "" ]]; then
+        for table in `cqlsh -e "USE $KEYSPACE; DESCRIBE TABLES;"`; do
+            refresh $KEYSPACE $table
+        done
+    else
+        refresh $KEYSPACE $TABLE
+    fi
+
+    echo "Data successfully restored from ${BUCKET} into ${FORMAT_NAME}"
 }
 
 # Validate Input/Environment
 # --------------------------
 # Great sample getopt implementation by Cosimo Streppone
 # https://gist.github.com/cosimo/3760587#file-parse-options-sh
-SHORT='hk:b:'
-LONG='help,keyspace:,bucket:'
+SHORT='hk:b:t:'
+LONG='help,keyspace:,bucket:,table:'
 OPTS=$( getopt -o $SHORT --long $LONG -n "$0" -- "$@" )
 
 if [ $? -gt 0 ]; then
@@ -54,20 +91,21 @@ while true; do
     case "$1" in
         -h|--help) usage;;
         -k|--keyspace) KEYSPACES+=("$2"); shift 2;;
+        -t|--table) TABLES+=("$2"); shift 2;;
         -b|--bucket) BUCKET="$2"; shift 2;;
         --) shift; break;;
         *) echo "Error processing command arguments" >&2; exit 1;;
     esac
 done
 
-# KEYSPACES is absolutely required
-if [ "$KEYSPACES" == "" ]; then
-    echo "You must provide keyspace(s) name(s)\n"
-    exit 1
-fi
 # BUCKET is absolutely required
 if [ "$BUCKET" == "" ]; then
-    echo "You must provide a bucket name\n"
+    echo "You must provide a bucket name"
+    exit 1
+fi
+# KEYSPACES or TABLES is required
+if [[ "$KEYSPACES" == "" && "$TABLES" == "" ]]; then
+    printf "You must provide at least a keyspace or a table name"
     exit 1
 fi
 
@@ -86,15 +124,10 @@ fi
 
 # Do restore of each keyspace
 for keyspace in ${KEYSPACES[@]}; do
-    echo "Restoring data stored in ${BUCKET} into ${keyspace}"
+    do_restore $keyspace
+done
 
-    swift download $BUCKET -p "$keyspace/" -D $CASSDATA
-    chown -R cassandra:cassandra "$CASSDATA/$keyspace"
-
-    for table in `cqlsh -e "USE $keyspace; DESCRIBE TABLES;"`; do
-        echo "Refreshing ${table}"
-        nodetool refresh ${keyspace} ${table}
-    done
-
-    echo "Data successfully restored from ${BUCKET} into ${keyspace}"
+# Do restore of each table
+for table in ${TABLES[@]}; do
+    do_restore $table
 done

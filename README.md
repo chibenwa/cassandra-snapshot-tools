@@ -87,6 +87,17 @@ You can as well use a Swift object storage to store directly all of the SSTable 
 
         Note: You need at least to pass as a parameter a keyspace or a table to backup!
 
+#### swiftDataSchemaRestore
+
+    Usage: ./swiftDataSchemaRestore.sh -h
+           ./swiftDataSchemaRestore.sh -b <bucket_name> [-k <keyspace_name> ...]
+        -h,--help                                 Print usage and exit
+        -a,--address <ip_address>                 REQUIRED: The ip address of the cassandra node to load data into
+        -b,--bucket <bucket_name>                 REQUIRED: The bucket name where the snapshot is stored on swift
+        -k,--keyspace <keyspace_name>             The keyspace where to restore the data (can restore multiple keyspaces)
+
+        Note: You need at least to pass as a parameter a keyspace load schema and data!
+
 ### Basic Examples
 
 1. Backup, clear then restore locally:

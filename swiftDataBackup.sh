@@ -46,6 +46,9 @@ SNAPSFILE="cassandra.snapshot"
 HOSTSFILE="cassandra.hostname"
 DATESFILE="cassandra.snapdate"
 
+set -Eeuo pipefail
+trap "mkdir -p /var/log/cassandra-snapshot/ && echo 'cassandra_snapshot_last_success 1' > /var/log/cassandra-snapshot/casssandra_snapshot_last_success.prom" ERR
+
 # Functions
 # ---------
 function parse_yaml {
@@ -280,4 +283,5 @@ done
 [ "$DUMPDIR" != "/" ] && rm -rf "$DUMPDIR"
 printf "Backup successfully uploaded\n"
 
+mkdir -p /var/log/cassandra-snapshot/ && echo 'cassandra_snapshot_last_success 0' > /var/log/cassandra-snapshot/casssandra_snapshot_last_success.prom
 # Fin.

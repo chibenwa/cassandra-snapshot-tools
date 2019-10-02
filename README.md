@@ -76,6 +76,10 @@ You can as well use a Swift object storage to store directly all of the SSTable 
 
         Note: You need at least to pass as a parameter a keyspace or a table to backup!
 
+Result of execution will be stored into a /var/log/cassandra-snapshot/casssandra_snapshot_last_success.prom file:
+ - 0 indicate successfull execution
+ - 1 indicate failure
+
 #### swiftDataRestore
 
     Usage: ./swiftDataRestore.sh -h
